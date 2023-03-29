@@ -1,0 +1,142 @@
+---
+title: "Assessing Spatial Heterogeneity in Predicted Whiff Rate Using Geographically Weighted Regression"
+author: "Riley Leonard"
+date: "April 2023"
+output: pdf_document
+header-includes:
+     - \usepackage{float}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(stargazer)
+library(car)
+library(GGally)
+library(kableExtra)
+library(pROC)
+library(MASS)
+library(glmnet)
+library(randomForest)
+library(caret)
+library(baseballr)
+```
+
+```{r message=FALSE, warning=FALSE}
+# Load Data (Kaggle)
+
+pitches <- read_csv("Statcast_2021.csv")
+
+
+# Data Wrangling
+
+pitches <- pitches %>%
+  dplyr::select(pitch_type, pitch_name, release_speed, release_pos_x, release_pos_z, events, description, 
+         zone, stand, p_throws, balls, strikes, bb_type, pfx_x, pfx_z, plate_x, plate_z, outs_when_up, 
+         inning, inning_topbot, on_3b, on_2b, on_1b, hc_x, hc_y, vx0, vy0, vz0, ax, ay, az, effective_speed,
+         release_spin_rate, release_extension, release_pos_y, estimated_woba_using_speedangle, spin_axis,
+         delta_run_exp)
+
+pitches_clean <- pitches %>%
+  drop_na(release_speed, release_pos_x, release_pos_z, pfx_x, pfx_z, 
+          plate_x, plate_z, vx0, vy0, vz0, ax, ay, az, effective_speed,
+          release_spin_rate, release_extension, release_pos_y, spin_axis)
+
+sample <- sample_n(pitches_clean, size = 15000)
+
+write_csv(sample, "spatialData.csv")
+
+
+# Load New Data
+
+pitches <- read_csv("spatialData.csv")
+
+```
+
+
+
+### Pitch Type
+
+```{r message=FALSE, warning=FALSE,fig.height=3, fig.width=6}
+# Caught Stealing Distribution (Example)
+
+pitchData %>%
+  ggplot(aes(x = WhiffProb, fill = as.factor(PitchType))) +
+    geom_density(alpha = 0.25) + 
+    labs(y = "Density",
+         x = "Whiff Probability",
+         fill = "Pitch Type") +
+    theme_classic() 
+
+```
+
+### Summary Table
+
+|                        | **203ed108** | **MLB Average** | **Difference** |
+|------------------------|--------------|-----------------|----------------|
+| **Avg Throw Accuracy** | -4.14        | -3.67           | -0.47          |
+| **Avg Throw Speed**    | 81.6         | 78.9            | +2.7           |
+| **Avg Pop Time**       | 1.99         | 2.00            | -0.01          |
+| **CS Pct**             | 0.317        | 0.351           | -0.034         |
+| **Expected CS Pct**    | 0.346        | 0.361           | -0.015         |
+| **CS Pct vs Expected** | -0.029       | -0.01           | -0.019         | 
+
+
+## Strike Zone
+
+```{r fig.height=5, fig.width=4, message=FALSE, warning=FALSE}
+# Accuracy Plot
+
+topKzone = 3.5
+botKzone = 1.6
+inKzone = -.95
+outKzone = 0.95
+kZone = data.frame(
+  x = c(inKzone, inKzone, outKzone, outKzone, inKzone)
+  , y = c(botKzone, topKzone, topKzone, botKzone, botKzone)
+)
+
+
+
+pitchData %>%
+  ggplot(aes(x = PlateSide, y = PlateHeight)) +
+    geom_point(aes(color = WhiffProb), size = 1, alpha = 0.5) + 
+   scale_x_continuous(limits = c(-2, 2)) +
+   scale_y_continuous(limits = c(0, 5)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         color = "Whiff Probability") +
+  geom_path(aes(x, y), data = kZone) +
+  scale_color_viridis_c() +
+  theme_classic()
+
+pitchData %>%
+  ggplot(aes(x = PlateSide, y = PlateHeight)) +
+  stat_density_2d(aes(fill = ..level..), geom = "polygon", colour="white") +
+  scale_x_continuous(limits = c(-2, 2)) +
+   scale_y_continuous(limits = c(0, 5)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         color = "Whiff Probability") +
+  geom_path(aes(x, y), data = kZone) +
+  theme_classic()
+
+pitchData %>%
+  ggplot(aes(x = PlateSide, y = PlateHeight)) +
+    stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
+    scale_fill_distiller(palette= "Spectral", direction=1) +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         color = "Whiff Probability") +
+  geom_path(aes(x, y), data = kZone) +
+  theme_classic()
+```
+
+
+
+
+
+
+
