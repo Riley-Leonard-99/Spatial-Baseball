@@ -17,12 +17,13 @@ library(kableExtra)
 library(pROC)
 library(MASS)
 library(glmnet)
-library(randomForest)
-library(caret)
-library(baseballr)
+library(raster)
+library(sp)
+library(spData)
+library(spgwr)
 ```
 
-```{r message=FALSE, warning=FALSE}
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
 # Load Data (Kaggle)
 
 pitches <- read_csv("Statcast_2021.csv")
@@ -42,47 +43,149 @@ pitches_clean <- pitches %>%
           plate_x, plate_z, vx0, vy0, vz0, ax, ay, az, effective_speed,
           release_spin_rate, release_extension, release_pos_y, spin_axis)
 
-sample <- sample_n(pitches_clean, size = 15000)
 
-write_csv(sample, "spatialData.csv")
+# Filter Swings
+
+swings <- pitches_clean %>%
+  filter(description %in% c("hit_into_play", "swinging_strike_blocked", "foul", "foul_tip","swinging_strike"))
 
 
-# Load New Data
+# Filter by Handedness
 
-pitches <- read_csv("spatialData.csv")
+swingsRHB <- swings %>%
+  filter(stand == "R")
 
+swingsLHB <- swings %>%
+  filter(stand == "L")
+
+
+# Filter by Pitch Type
+
+swingsFastRHB<- swingsRHB %>%
+  filter(pitch_type %in% c("FF", "SI"))
+
+swingsOffRHB <- anti_join(swingsRHB, swingsFastRHB)
+
+swingsFastLHB<- swingsLHB %>%
+  filter(pitch_type %in% c("FF", "SI"))
+
+swingsOffLHB <- anti_join(swingsLHB, swingsFastLHB)
+
+
+# Create Samples
+
+set.seed(0)
+
+sampleFastRHB <- sample_n(swingsFastRHB, size = 15000)
+
+sampleOffRHB <- sample_n(swingsOffRHB, size = 15000)
+
+sampleFastLHB <- sample_n(swingsFastLHB, size = 15000)
+
+sampleOffLHB <- sample_n(swingsOffLHB, size = 15000)
+
+
+# Write CSVs
+
+write_csv(sampleFastRHB, "swingsFastRHB.csv")
+
+write_csv(sampleOffRHB, "swingsOffRHB.csv")
+
+write_csv(sampleFastLHB, "swingsFastLHB.csv")
+
+write_csv(sampleOffLHB, "swingsOffLHB.csv")
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Load Data
+
+fastRHB <- read_csv("swingsFastRHB.csv")
+offRHB <- read_csv("swingsOffRHB.csv")
+fastLHB <- read_csv("swingsFastLHB.csv")
+offLHB <- read_csv("swingsOffLHB.csv")
+
+pitches <- read_csv("swingData.csv")
+```
+
+
+```{r include=FALSE}
+# Wrangling
+
+pitches <- pitches %>%
+  mutate(whiff = ifelse(description %in% c("swinging_strike", "swinging_strike_blocked"), 1, 0),
+         no_balls = ifelse(balls == 0, 1, 0),
+         one_ball = ifelse(balls == 1, 1, 0),
+         two_balls = ifelse(balls == 2, 1, 0),
+         three_balls = ifelse(balls == 3, 1, 0),
+         no_strikes = ifelse(strikes == 0, 1, 0),
+         one_strike = ifelse(strikes == 1, 1, 0),
+         two_strikes = ifelse(strikes == 2, 1, 0)) %>%
+  rename(horz_movement = pfx_x,
+         vert_movement = pfx_z) %>%
+  mutate(horz_movement = abs(horz_movement))
+  
+
+fastRHB <- fastRHB %>%
+  mutate(whiff = ifelse(description %in% c("swinging_strike", "swinging_strike_blocked"), 1, 0),
+         no_balls = ifelse(balls == 0, 1, 0),
+         one_ball = ifelse(balls == 1, 1, 0),
+         two_balls = ifelse(balls == 2, 1, 0),
+         three_balls = ifelse(balls == 3, 1, 0),
+         no_strikes = ifelse(strikes == 0, 1, 0),
+         one_strike = ifelse(strikes == 1, 1, 0),
+         two_strikes = ifelse(strikes == 2, 1, 0)) %>%
+  rename(horz_movement = pfx_x,
+         vert_movement = pfx_z) %>%
+  mutate(horz_movement = abs(horz_movement))
+
+
+offRHB <- offRHB %>%
+  mutate(whiff = ifelse(description %in% c("swinging_strike", "swinging_strike_blocked"), 1, 0),
+         no_balls = ifelse(balls == 0, 1, 0),
+         one_ball = ifelse(balls == 1, 1, 0),
+         two_balls = ifelse(balls == 2, 1, 0),
+         three_balls = ifelse(balls == 3, 1, 0),
+         no_strikes = ifelse(strikes == 0, 1, 0),
+         one_strike = ifelse(strikes == 1, 1, 0),
+         two_strikes = ifelse(strikes == 2, 1, 0)) %>%
+  rename(horz_movement = pfx_x,
+         vert_movement = pfx_z) %>%
+  mutate(horz_movement = abs(horz_movement))
+
+
+fastLHB <- fastLHB %>%
+  mutate(whiff = ifelse(description %in% c("swinging_strike", "swinging_strike_blocked"), 1, 0),
+         no_balls = ifelse(balls == 0, 1, 0),
+         one_ball = ifelse(balls == 1, 1, 0),
+         two_balls = ifelse(balls == 2, 1, 0),
+         three_balls = ifelse(balls == 3, 1, 0),
+         no_strikes = ifelse(strikes == 0, 1, 0),
+         one_strike = ifelse(strikes == 1, 1, 0),
+         two_strikes = ifelse(strikes == 2, 1, 0)) %>%
+  rename(horz_movement = pfx_x,
+         vert_movement = pfx_z) %>%
+  mutate(horz_movement = abs(horz_movement))
+
+
+
+offLHB <- offLHB %>%
+  mutate(whiff = ifelse(description %in% c("swinging_strike", "swinging_strike_blocked"), 1, 0),
+         no_balls = ifelse(balls == 0, 1, 0),
+         one_ball = ifelse(balls == 1, 1, 0),
+         two_balls = ifelse(balls == 2, 1, 0),
+         three_balls = ifelse(balls == 3, 1, 0),
+         no_strikes = ifelse(strikes == 0, 1, 0),
+         one_strike = ifelse(strikes == 1, 1, 0),
+         two_strikes = ifelse(strikes == 2, 1, 0)) %>%
+  rename(horz_movement = pfx_x,
+         vert_movement = pfx_z) %>%
+  mutate(horz_movement = abs(horz_movement))
 ```
 
 
 
-### Pitch Type
-
-```{r message=FALSE, warning=FALSE,fig.height=3, fig.width=6}
-# Caught Stealing Distribution (Example)
-
-pitchData %>%
-  ggplot(aes(x = WhiffProb, fill = as.factor(PitchType))) +
-    geom_density(alpha = 0.25) + 
-    labs(y = "Density",
-         x = "Whiff Probability",
-         fill = "Pitch Type") +
-    theme_classic() 
-
-```
-
-### Summary Table
-
-|                        | **203ed108** | **MLB Average** | **Difference** |
-|------------------------|--------------|-----------------|----------------|
-| **Avg Throw Accuracy** | -4.14        | -3.67           | -0.47          |
-| **Avg Throw Speed**    | 81.6         | 78.9            | +2.7           |
-| **Avg Pop Time**       | 1.99         | 2.00            | -0.01          |
-| **CS Pct**             | 0.317        | 0.351           | -0.034         |
-| **Expected CS Pct**    | 0.346        | 0.361           | -0.015         |
-| **CS Pct vs Expected** | -0.029       | -0.01           | -0.019         | 
-
-
-## Strike Zone
+## Non-uniform Distribution of Response Variable in Space
 
 ```{r fig.height=5, fig.width=4, message=FALSE, warning=FALSE}
 # Accuracy Plot
@@ -97,45 +200,433 @@ kZone = data.frame(
 )
 
 
-
-pitchData %>%
-  ggplot(aes(x = PlateSide, y = PlateHeight)) +
-    geom_point(aes(color = WhiffProb), size = 1, alpha = 0.5) + 
-   scale_x_continuous(limits = c(-2, 2)) +
-   scale_y_continuous(limits = c(0, 5)) +
-    labs(y = "Vertical Location",
-         x = "Horizontal Location",
-         color = "Whiff Probability") +
-  geom_path(aes(x, y), data = kZone) +
-  scale_color_viridis_c() +
-  theme_classic()
-
-pitchData %>%
-  ggplot(aes(x = PlateSide, y = PlateHeight)) +
-  stat_density_2d(aes(fill = ..level..), geom = "polygon", colour="white") +
-  scale_x_continuous(limits = c(-2, 2)) +
-   scale_y_continuous(limits = c(0, 5)) +
-    labs(y = "Vertical Location",
-         x = "Horizontal Location",
-         color = "Whiff Probability") +
-  geom_path(aes(x, y), data = kZone) +
-  theme_classic()
-
-pitchData %>%
-  ggplot(aes(x = PlateSide, y = PlateHeight)) +
-    stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
-    scale_fill_distiller(palette= "Spectral", direction=1) +
+pitches %>%
+  ggplot(aes(x = plate_x, y = plate_z)) +
+  stat_density_2d(aes(fill = ..level..), geom = "polygon", colour = "white") +
   scale_x_continuous(limits = c(-2, 2)) +
   scale_y_continuous(limits = c(0, 5)) +
     labs(y = "Vertical Location",
-         x = "Horizontal Location",
-         color = "Whiff Probability") +
+         x = "Horizontal Location") +
+  geom_path(aes(x, y), data = kZone) +
+  theme_classic()
+
+pitches %>%
+  filter(whiff == 0) %>%
+  ggplot(aes(x = plate_x, y = plate_z)) +
+  stat_density_2d(aes(fill = ..level..), geom = "polygon", colour = "white") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location") +
+  geom_path(aes(x, y), data = kZone) +
+  theme_classic()
+
+pitches %>%
+  filter(whiff == 1) %>%
+  ggplot(aes(x = plate_x, y = plate_z)) +
+  stat_density_2d(aes(fill = ..level..), geom = "polygon", colour = "white") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location") +
+  geom_path(aes(x, y), data = kZone) +
+  theme_classic()
+
+pitches %>%
+  ggplot(aes(x = plate_x, y = plate_z)) +
+    stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
+    scale_fill_distiller(palette= "Spectral", direction = 1) +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location") +
+  geom_path(aes(x, y), data = kZone) +
+  theme_classic()
+
+pitches %>%
+  filter(whiff == 1) %>%
+  ggplot(aes(x = plate_x, y = plate_z)) +
+    stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
+    scale_fill_distiller(palette= "Spectral", direction = 1) +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location") +
   geom_path(aes(x, y), data = kZone) +
   theme_classic()
 ```
 
+```{r fig.height=10, fig.width=8, message=FALSE, warning=FALSE}
+# Density Plots
+
+offRHB %>%
+  ggplot(aes(x = plate_x, y = plate_z)) +
+  stat_density_2d(aes(fill = ..level..), geom = "polygon", colour = "white") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Density") +
+  ggtitle("Pitches (RHB)") +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+offRHB %>%
+  filter(whiff == 0) %>%
+  ggplot(aes(x = plate_x, y = plate_z)) +
+  stat_density_2d(aes(fill = ..level..), geom = "polygon", colour = "white") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Density") +
+  ggtitle("Non-whiffs (RHB)") +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+offRHB %>%
+  filter(whiff == 1) %>%
+  ggplot(aes(x = plate_x, y = plate_z)) +
+  stat_density_2d(aes(fill = ..level..), geom = "polygon", colour = "white") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Density") +
+  ggtitle("Whiffs (RHB)") +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+```
+
+*Conclusion: fitted coefficient values of a global parametric model may fail to capture local variations in the data.*
+
+## Analyzing Spatial Autocorrelation
+
+```{r}
+# Spatial Autocorrelation
+
+# Create Polygons
+
+# Define Adjacent Polygons
+```
 
 
+
+## Parametric Model for Whiff Rate
+
+```{r message=FALSE, warning=FALSE}
+## Create Parametric Model for Whiff Rate
+
+set.seed(0)
+
+
+# Create Training and Test Data
+
+Train <- pitches %>% sample_frac(2/3)
+Test <- anti_join(pitches, Train)
+
+
+# Logistic Regression
+
+logistic_model <- glm(whiff ~ release_speed + release_spin_rate + horz_movement + vert_movement + ay +
+                      one_ball + two_balls + three_balls + one_strike + two_strikes,
+                      data = Train, family = "binomial")
+
+
+# Logistic Regression Fastballs RHB
+
+TrainFastRHB <- fastRHB %>% sample_frac(2/3)
+TestFastRHB<- anti_join(pitches, TrainFastRHB)
+
+log_fast_rhb <- glm(whiff ~ release_speed + release_spin_rate + horz_movement + vert_movement + ay,
+                    data = TrainFastRHB, family = "binomial")
+
+
+# Logistic Regression Off-Speeds RHB
+
+TrainOffRHB <- offRHB %>% sample_frac(2/3)
+TestOffRHB<- anti_join(pitches, TrainOffRHB)
+
+
+log_off_rhb <- glm(whiff ~ release_speed + release_spin_rate + horz_movement + vert_movement + ay,
+                   data = TrainOffRHB, family = "binomial")
+
+
+```
+
+
+Important differences between models:
+
+* In general model, the coefficient estimate for release speed is negative, since it is confounded by pitch type
+* In the pitch-specific models, the coefficient estimate for release speed is positive but non-significant
+* The estimated coefficient for the vertical movement parameter is significant and negative for off-speed pitches (more downward movement is associated with a greater whiff probability)
+* The estimated coefficient for the vertical movement parameter is significant and positive for fastballs (less downward movement is associated with a greater whiff probability)
+* The estimated coefficient for the horizontal movement parameter is significant and negative for fastballs
+* Acceleration is associated with a significant positive increase in whiff probability for both pitch families
+* The count indicators are mostly significant and exist to control for contextual confounds and provide model stabilizing effects. The count indicators improve predictive performance, but do not meaningfully effect the direction and magnitude of the coefficient estimates of interest (they will thus be omitted from the GWR).
+
+
+
+### GWR (Off-speed RHB)
+
+```{r}
+# Model Predictions
+
+pred <- predict(log_off_rhb, offRHB, type = "response")
+data <- cbind(offRHB, pred)
+```
+
+
+## Covriate Raster (predictions)
+
+```{r}
+# Covariate Raster
+
+data_short <- offRHB %>%
+  dplyr::select(release_speed, release_spin_rate, horz_movement, vert_movement, ay)
+
+pts <- SpatialPoints(c(offRHB[ ,16], offRHB[ ,17]))
+
+spData <- SpatialPointsDataFrame(pts, data = data_short)
+
+r <- raster(spData)
+res(r) <- 0.1
+f <- rasterize(spData, r)
+plot(f)
+```
+
+
+## Covariate Raster (new)
+
+```{r}
+# Covariate Raster
+
+data_short2 <- data %>%
+  dplyr::select(pred)
+
+spData2 <- SpatialPointsDataFrame(pts, data = data_short2)
+
+r2 <- raster(spData2)
+res(r2) <- 0.1
+f2 <- rasterize(spData2, r2)
+plot(f2) +
+  geom_path(aes(x, y), data = kZone)
+```
+
+
+## GWR
+
+```{r}
+set.seed(0)
+
+pred <- predict(log_off_rhb, TrainOffRHB, type = "response")
+
+data_sample_short <- TrainOffRHB %>%
+  dplyr::select(release_speed, release_spin_rate, horz_movement, vert_movement, ay)
+
+data_sample_short <- cbind(data_sample_short, pred)
+
+coords <- data.frame(x = TrainOffRHB[ ,16], y = TrainOffRHB[ ,17])
+
+sample_pts <- SpatialPoints(coords)
+
+spSample <- SpatialPointsDataFrame(sample_pts, data = data_sample_short)
+
+r2 <- raster(spSample)
+
+res(r2) <- 0.1
+
+fitpoints <- rasterToPoints(r2)
+
+#GWRbandwidth <- gwr.sel(pred ~ release_speed + release_spin_rate + horz_movement + vert_movement + ay, 
+#                        data = spSample, coords = coords, adapt = T) 
+
+gwr.model <- gwr(pred ~ release_speed + release_spin_rate + horz_movement + vert_movement + ay,
+                 data = spSample,
+                 longlat = FALSE,
+                 adapt = 0.01121417,
+                 fit.points = fitpoints)
+```
+
+```{r}
+sp <- gwr.model$SDF
+spplot(sp, 'sum.w')
+```
+
+```{r fig.height=10, fig.width=8, message=FALSE, warning=FALSE}
+cells <- cellFromXY(r2, fitpoints)
+dd <- as.matrix(data.frame(sp))
+b <- brick(r2, values = FALSE, nl = ncol(dd))
+b[cells] <- dd
+names(b) <- colnames(dd)
+plot(b)
+
+results <- as.data.frame(gwr.model$SDF)
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = vert_movement)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Vertical Movement") +
+  scale_fill_distiller(direction = 1) +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = release_speed)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Release Speed") +
+  scale_fill_distiller(direction = 1) +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = release_spin_rate)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Spin Rate") +
+  scale_fill_distiller(direction = 1) +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = horz_movement)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Horizontal Movement") +
+  scale_fill_distiller(direction = 1) +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = vert_movement)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Vertical Movement") +
+  scale_fill_fermenter(direction = 1) +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = ay)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Acceleration") +
+  scale_fill_distiller(direction = 1) +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+```
+
+*Isotropic spatial weights kernel bandwidth of 0.01121417 determined by leave-one-out cross-validation.*
+
+
+## New Scatter Plot with Color by Predicted Whiff Rate
+
+
+## Extensions
+
+Model for continuous response (xWOBA)
 
 
 
