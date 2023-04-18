@@ -17,8 +17,9 @@ library(kableExtra)
 library(pROC)
 library(MASS)
 library(glmnet)
-library(raster)
 library(sp)
+library(raster)
+library(spdep)
 library(spData)
 library(spgwr)
 ```
@@ -76,13 +77,13 @@ swingsOffLHB <- anti_join(swingsLHB, swingsFastLHB)
 
 set.seed(0)
 
-sampleFastRHB <- sample_n(swingsFastRHB, size = 15000)
+sampleFastRHB <- sample_n(swingsFastRHB, size = 50000)
 
-sampleOffRHB <- sample_n(swingsOffRHB, size = 15000)
+sampleOffRHB <- sample_n(swingsOffRHB, size = 50000)
 
-sampleFastLHB <- sample_n(swingsFastLHB, size = 15000)
+sampleFastLHB <- sample_n(swingsFastLHB, size = 50000)
 
-sampleOffLHB <- sample_n(swingsOffLHB, size = 15000)
+sampleOffLHB <- sample_n(swingsOffLHB, size = 50000)
 
 
 # Write CSVs
@@ -231,29 +232,6 @@ pitches %>%
          x = "Horizontal Location") +
   geom_path(aes(x, y), data = kZone) +
   theme_classic()
-
-pitches %>%
-  ggplot(aes(x = plate_x, y = plate_z)) +
-    stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
-    scale_fill_distiller(palette= "Spectral", direction = 1) +
-  scale_x_continuous(limits = c(-2, 2)) +
-  scale_y_continuous(limits = c(0, 5)) +
-    labs(y = "Vertical Location",
-         x = "Horizontal Location") +
-  geom_path(aes(x, y), data = kZone) +
-  theme_classic()
-
-pitches %>%
-  filter(whiff == 1) %>%
-  ggplot(aes(x = plate_x, y = plate_z)) +
-    stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
-    scale_fill_distiller(palette= "Spectral", direction = 1) +
-  scale_x_continuous(limits = c(-2, 2)) +
-  scale_y_continuous(limits = c(0, 5)) +
-    labs(y = "Vertical Location",
-         x = "Horizontal Location") +
-  geom_path(aes(x, y), data = kZone) +
-  theme_classic()
 ```
 
 ```{r fig.height=10, fig.width=8, message=FALSE, warning=FALSE}
@@ -326,12 +304,28 @@ offRHB %>%
 
 ## Analyzing Spatial Autocorrelation
 
-```{r}
+```{r fig.height=3, fig.width=4}
 # Spatial Autocorrelation
 
-# Create Polygons
+pitches <- pitches %>%
+   drop_na(plate_x, plate_z)
+  
+data_short_pitches <- pitches %>%
+  dplyr::select(release_speed, release_spin_rate, horz_movement, vert_movement, whiff)
 
-# Define Adjacent Polygons
+pts_pitches <- SpatialPoints(c(pitches[ ,16], pitches[ ,17]))
+
+S.dist  <-  dnearneigh(pts_pitches, 0, 0.3)  
+
+lw <- nb2listw(S.dist, style="W",zero.policy=T) 
+
+spData_pitches <- SpatialPointsDataFrame(pts_pitches, data = data_short_pitches)
+
+MI  <-  moran.mc(spData_pitches$whiff, lw, nsim=500,zero.policy=T) 
+
+plot(MI, las=1, xlab = "statistic = 0.14184, p-value = 0.001996", main = "Monte-Carlo Simulation of Moran's I") 
+
+MI
 ```
 
 
@@ -418,11 +412,11 @@ res(r) <- 0.1
 f <- rasterize(spData, r)
 plot(f)
 ```
-
+*Covariates distributed uniformly in space*
 
 ## Covariate Raster (new)
 
-```{r}
+```{r fig.height=10, fig.width=8}
 # Covariate Raster
 
 data_short2 <- data %>%
@@ -433,24 +427,43 @@ spData2 <- SpatialPointsDataFrame(pts, data = data_short2)
 r2 <- raster(spData2)
 res(r2) <- 0.1
 f2 <- rasterize(spData2, r2)
-plot(f2) +
-  geom_path(aes(x, y), data = kZone)
+plot(f2) 
+
+spData3 <- as.data.frame(spData2)
+
+data %>%
+  ggplot(aes(x = plate_x, y = plate_z)) +
+    geom_raster(aes(fill = as.factor(whiff)), alpha = 0.8) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Actual Value") +
+  ggtitle("Observed Whiffs") +
+  scale_fill_manual(values = c("gold", "#dd3a3e")) +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
 ```
 
 
-## GWR
+## GWR (Off RHB)
 
 ```{r}
 set.seed(0)
 
-pred <- predict(log_off_rhb, TrainOffRHB, type = "response")
+data_sample_short <- offRHB %>%
+  dplyr::select(release_speed, release_spin_rate, horz_movement, vert_movement, ay, whiff)
 
-data_sample_short <- TrainOffRHB %>%
-  dplyr::select(release_speed, release_spin_rate, horz_movement, vert_movement, ay)
 
-data_sample_short <- cbind(data_sample_short, pred)
-
-coords <- data.frame(x = TrainOffRHB[ ,16], y = TrainOffRHB[ ,17])
+coords <- data.frame(x = offRHB[ ,16], y = offRHB[ ,17])
 
 sample_pts <- SpatialPoints(coords)
 
@@ -458,14 +471,14 @@ spSample <- SpatialPointsDataFrame(sample_pts, data = data_sample_short)
 
 r2 <- raster(spSample)
 
-res(r2) <- 0.1
+res(r2) <- 0.025
 
 fitpoints <- rasterToPoints(r2)
 
 #GWRbandwidth <- gwr.sel(pred ~ release_speed + release_spin_rate + horz_movement + vert_movement + ay, 
 #                        data = spSample, coords = coords, adapt = T) 
 
-gwr.model <- gwr(pred ~ release_speed + release_spin_rate + horz_movement + vert_movement + ay,
+gwr.model <- gwr(whiff ~ release_speed + release_spin_rate + horz_movement + vert_movement + ay,
                  data = spSample,
                  longlat = FALSE,
                  adapt = 0.01121417,
@@ -494,7 +507,7 @@ results %>%
          x = "Horizontal Location",
          fill = "Parameter Estimate") +
   ggtitle("Vertical Movement") +
-  scale_fill_distiller(direction = 1) +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
   scale_x_continuous(limits = c(-2, 2)) +
   scale_y_continuous(limits = c(0, 5)) +
   geom_path(aes(x, y), data = kZone, linewidth = 2) +
@@ -515,7 +528,7 @@ results %>%
          x = "Horizontal Location",
          fill = "Parameter Estimate") +
   ggtitle("Release Speed") +
-  scale_fill_distiller(direction = 1) +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
   scale_x_continuous(limits = c(-2, 2)) +
   scale_y_continuous(limits = c(0, 5)) +
   geom_path(aes(x, y), data = kZone, linewidth = 2) +
@@ -536,7 +549,7 @@ results %>%
          x = "Horizontal Location",
          fill = "Parameter Estimate") +
   ggtitle("Spin Rate") +
-  scale_fill_distiller(direction = 1) +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
   scale_x_continuous(limits = c(-2, 2)) +
   scale_y_continuous(limits = c(0, 5)) +
   geom_path(aes(x, y), data = kZone, linewidth = 2) +
@@ -558,29 +571,7 @@ results %>%
          x = "Horizontal Location",
          fill = "Parameter Estimate") +
   ggtitle("Horizontal Movement") +
-  scale_fill_distiller(direction = 1) +
-  scale_x_continuous(limits = c(-2, 2)) +
-  scale_y_continuous(limits = c(0, 5)) +
-  geom_path(aes(x, y), data = kZone, linewidth = 2) +
-  theme_classic() +
-  theme(axis.text = element_text(size = 24),
-        axis.title.y = element_text(size = 28, vjust = 4),
-        axis.title.x = element_text(size = 28, vjust = -1),
-        legend.text = element_text(size = 24),
-        legend.title = element_text(size = 28, vjust = 3),
-        legend.key.size = unit(1.5, 'cm'),
-        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
-        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
-
-
-results %>%
-  ggplot(aes(x = x, y = y)) +
-    geom_raster(aes(fill = vert_movement)) +
-    labs(y = "Vertical Location",
-         x = "Horizontal Location",
-         fill = "Parameter Estimate") +
-  ggtitle("Vertical Movement") +
-  scale_fill_fermenter(direction = 1) +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
   scale_x_continuous(limits = c(-2, 2)) +
   scale_y_continuous(limits = c(0, 5)) +
   geom_path(aes(x, y), data = kZone, linewidth = 2) +
@@ -602,7 +593,7 @@ results %>%
          x = "Horizontal Location",
          fill = "Parameter Estimate") +
   ggtitle("Acceleration") +
-  scale_fill_distiller(direction = 1) +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
   scale_x_continuous(limits = c(-2, 2)) +
   scale_y_continuous(limits = c(0, 5)) +
   geom_path(aes(x, y), data = kZone, linewidth = 2) +
@@ -621,13 +612,507 @@ results %>%
 *Isotropic spatial weights kernel bandwidth of 0.01121417 determined by leave-one-out cross-validation.*
 
 
-## New Scatter Plot with Color by Predicted Whiff Rate
+## GWR (Fast RHB)
+
+```{r}
+set.seed(0)
+
+data_sample_short <- fastRHB %>%
+  dplyr::select(release_speed, release_spin_rate, horz_movement, vert_movement, ay, whiff)
+
+coords <- data.frame(x = fastRHB[ ,16], y = fastRHB[ ,17])
+
+sample_pts <- SpatialPoints(coords)
+
+spSample <- SpatialPointsDataFrame(sample_pts, data = data_sample_short)
+
+r2 <- raster(spSample)
+
+res(r2) <- 0.025
+
+fitpoints <- rasterToPoints(r2)
+
+#GWRbandwidth <- gwr.sel(pred ~ release_speed + release_spin_rate + horz_movement + vert_movement + ay, 
+#                        data = spSample, coords = coords, adapt = T) 
+
+gwr.model <- gwr(whiff ~ release_speed + release_spin_rate + horz_movement + vert_movement + ay,
+                 data = spSample,
+                 longlat = FALSE,
+                 adapt = 0.01121417,
+                 fit.points = fitpoints)
+```
+
+```{r}
+sp <- gwr.model$SDF
+spplot(sp, 'sum.w')
+```
+
+```{r fig.height=10, fig.width=8, message=FALSE, warning=FALSE}
+cells <- cellFromXY(r2, fitpoints)
+dd <- as.matrix(data.frame(sp))
+b <- brick(r2, values = FALSE, nl = ncol(dd))
+b[cells] <- dd
+names(b) <- colnames(dd)
+plot(b)
+
+results <- as.data.frame(gwr.model$SDF)
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = vert_movement)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Vertical Movement") +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = release_speed)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Release Speed") +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = release_spin_rate)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Spin Rate") +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = horz_movement)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Horizontal Movement") +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = ay)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Acceleration") +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+```
+
+
+## GWR (Off LHB)
+
+```{r}
+set.seed(0)
+
+data_sample_short <- offLHB %>%
+  dplyr::select(release_speed, release_spin_rate, horz_movement, vert_movement, ay, whiff)
+
+
+coords <- data.frame(x = offLHB[ ,16], y = offLHB[ ,17])
+
+sample_pts <- SpatialPoints(coords)
+
+spSample <- SpatialPointsDataFrame(sample_pts, data = data_sample_short)
+
+r2 <- raster(spSample)
+
+res(r2) <- 0.025
+
+fitpoints <- rasterToPoints(r2)
+
+#GWRbandwidth <- gwr.sel(pred ~ release_speed + release_spin_rate + horz_movement + vert_movement + ay, 
+#                        data = spSample, coords = coords, adapt = T) 
+
+gwr.model <- gwr(whiff ~ release_speed + release_spin_rate + horz_movement + vert_movement + ay,
+                 data = spSample,
+                 longlat = FALSE,
+                 adapt = 0.01121417,
+                 fit.points = fitpoints)
+```
+
+```{r}
+sp <- gwr.model$SDF
+spplot(sp, 'sum.w')
+```
+
+```{r fig.height=10, fig.width=8, message=FALSE, warning=FALSE}
+cells <- cellFromXY(r2, fitpoints)
+dd <- as.matrix(data.frame(sp))
+b <- brick(r2, values = FALSE, nl = ncol(dd))
+b[cells] <- dd
+names(b) <- colnames(dd)
+plot(b)
+
+results <- as.data.frame(gwr.model$SDF)
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = vert_movement)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Vertical Movement") +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = release_speed)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Release Speed") +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = release_spin_rate)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Spin Rate") +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = horz_movement)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Horizontal Movement") +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = ay)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Acceleration") +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+```
+
+
+## GWR (Fast LHB)
+
+```{r}
+set.seed(0)
+
+data_sample_short <- fastLHB %>%
+  dplyr::select(release_speed, release_spin_rate, horz_movement, vert_movement, ay, whiff)
+
+
+coords <- data.frame(x = fastLHB[ ,16], y = fastLHB[ ,17])
+
+sample_pts <- SpatialPoints(coords)
+
+spSample <- SpatialPointsDataFrame(sample_pts, data = data_sample_short)
+
+r2 <- raster(spSample)
+
+res(r2) <- 0.025
+
+fitpoints <- rasterToPoints(r2)
+
+#GWRbandwidth <- gwr.sel(pred ~ release_speed + release_spin_rate + horz_movement + vert_movement + ay, 
+#                        data = spSample, coords = coords, adapt = T) 
+
+gwr.model <- gwr(whiff ~ release_speed + release_spin_rate + horz_movement + vert_movement + ay,
+                 data = spSample,
+                 longlat = FALSE,
+                 adapt = 0.01121417,
+                 fit.points = fitpoints)
+```
+
+```{r}
+sp <- gwr.model$SDF
+spplot(sp, 'sum.w')
+```
+
+```{r fig.height=10, fig.width=8, message=FALSE, warning=FALSE}
+cells <- cellFromXY(r2, fitpoints)
+dd <- as.matrix(data.frame(sp))
+b <- brick(r2, values = FALSE, nl = ncol(dd))
+b[cells] <- dd
+names(b) <- colnames(dd)
+plot(b)
+
+results <- as.data.frame(gwr.model$SDF)
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = vert_movement)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Vertical Movement") +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = release_speed)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Release Speed") +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = release_spin_rate)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Spin Rate") +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = horz_movement)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Horizontal Movement") +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+
+results %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_raster(aes(fill = ay)) +
+    labs(y = "Vertical Location",
+         x = "Horizontal Location",
+         fill = "Parameter Estimate") +
+  ggtitle("Acceleration") +
+  scale_fill_gradient2(low = "blue", high = "#dd3a3e") +
+  scale_x_continuous(limits = c(-2, 2)) +
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_path(aes(x, y), data = kZone, linewidth = 2) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 24),
+        axis.title.y = element_text(size = 28, vjust = 4),
+        axis.title.x = element_text(size = 28, vjust = -1),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 28, vjust = 3),
+        legend.key.size = unit(1.5, 'cm'),
+        plot.margin = ggplot2::margin(18, 18, 18, 18, 'points'),
+        plot.title = element_text(size = 32, face = "bold.italic", hjust = 0.5))
+
+```
 
 
 ## Extensions
 
 Model for continuous response (xWOBA)
+Standardize parameter values for more meaningful interpretation of coefficient estimates
+Use model to more accurately predict pitching performance (account for command)
+Bigger models (over 500,000 observations per season)
+Because I am concerned with inference rather than prediction, I focus on explanatory variables that are relevant to pitching performance explicitly.
+
+
+## Introduction
+
+While the use of spatial statistical analysis has become increasingly ubiquitous in academic fields such as geography and ecology, its adoption in sports analytics is far less *universal*. This introduces an exciting opportunity for professional sports organizations to leverage a novel and under-utilized family of statistical approaches for a variety of complex data problems. Spatial statistics has particularly germane applications in the sport of baseball, where play-by-play data is nearly always accompanied by each observation's vertical and horizontal locations in space---whether it be the coordinates of a pitch as it crosses home plate or the hit location of a batted ball. 
+
+In these cases, the analysis of baseball play-by-play data can benefit from the use of spatial statistical techniques. One such spatial approach is Geographically Weighted Regression (GWR). Whereas the fitted coefficient values of a global parametric model may fail to capture local variations in the data, GWR...
+
+In order to demonstrate the *capacity* (synonym) of GWR to create accurate and insightful statistical inferences from spatial data, I create a model of whiff prediction as it varies in coordinate space.
+
+Quck discussion on Whiffs....
+
+The evident non-uniform distribution of whiffs in space suggests a spatial component to the data generating process. The degree of spatial autocorrelation can be determined empirically by calculating the Moran's I measure of the response variable...
 
 
 
+Isotropic spatial weights kernel bandwidth of 0.01121417 determined by leave-one-out cross-validation
 
+
+## Interpretation
+
+Important differences between models:
+
+* In general model, the coefficient estimate for release speed is negative, since it is confounded by pitch type
+* In the pitch-specific models, the coefficient estimate for release speed is positive but non-significant
+* The estimated coefficient for the vertical movement parameter is significant and negative for off-speed pitches (more downward movement is associated with a greater whiff probability)
+* The estimated coefficient for the vertical movement parameter is significant and positive for fastballs (less downward movement is associated with a greater whiff probability)
+* The estimated coefficient for the horizontal movement parameter is significant and negative for fastballs
+* Acceleration is associated with a significant positive increase in whiff probability for both pitch families
+* The count indicators are mostly significant and exist to control for contextual confounds and provide model stabilizing effects. The count indicators improve predictive performance, but do not meaningfully effect the direction and magnitude of the coefficient estimates of interest (they will thus be omitted from the GWR).
