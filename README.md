@@ -2,4 +2,4 @@
 
 Assessing Spatial Heterogeneity in Parametric Whiff Rate Estimation Using Geographically Weighted Regression
 
-https://github.com/Riley-Leonard-99/Spatial-Baseball/blob/main/SpatialBaseballPoster.png
+![SpatialBaseballPoster](https://github.com/Riley-Leonard-99/Spatial-Baseball/blob/main/SpatialBaseballPoster.png)
